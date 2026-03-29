@@ -13,7 +13,7 @@ agent = ["httpx>=0.27.0"]
 dev = ["pytest"]
 
 [project.urls]
-Homepage = "https://github.com/henrychien/agent-alerts"
+Homepage = "https://github.com/henrysouchien/agent-alerts"
 
 [project.scripts]
 alerts-mcp = "alerts.mcp_server:main"
