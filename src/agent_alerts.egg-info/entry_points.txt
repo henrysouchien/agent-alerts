@@ -1,2 +1,0 @@
-[console_scripts]
-alerts-mcp = alerts.mcp_server:main
