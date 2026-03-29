@@ -1,0 +1,33 @@
+[project]
+name = "agent-alerts"
+version = "0.1.0"
+description = "Structured alert routing to humans and AI agents"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = ["PyYAML>=6.0"]
+
+[project.optional-dependencies]
+mcp = ["fastmcp>=0.1.0"]
+agent = ["httpx>=0.27.0"]
+dev = ["pytest"]
+
+[project.urls]
+Homepage = "https://github.com/henrychien/agent-alerts"
+
+[project.scripts]
+alerts-mcp = "alerts.mcp_server:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["alerts*"]
+exclude = ["alerts.tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["src/alerts/tests"]
+python_files = ["test_*.py"]
+addopts = ["-ra", "--tb=short"]
