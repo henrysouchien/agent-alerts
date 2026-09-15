@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from .channels.email import send_email
 from .channels.imessage import send_imessage
@@ -44,8 +44,14 @@ def send_alert(
     config_path: str | Path | None = None,
     env_file: str | Path | None = None,
     env: Mapping[str, str] | None = None,
+    agent_dispatch_fn: Callable[[str, str, Any, Mapping[str, str] | None, dict[str, str]], None] | None = None,
 ) -> AlertResult:
-    active_router = router or AlertRouter(config_path=_require_config_path(config_path), env_file=env_file, env=env)
+    active_router = router or AlertRouter(
+        config_path=_require_config_path(config_path),
+        env_file=env_file,
+        env=env,
+        agent_dispatch_fn=agent_dispatch_fn,
+    )
     return active_router.send(alert)
 
 
@@ -63,6 +69,7 @@ def send_alert_message(
     config_path: str | Path | None = None,
     env_file: str | Path | None = None,
     env: Mapping[str, str] | None = None,
+    agent_dispatch_fn: Callable[[str, str, Any, Mapping[str, str] | None, dict[str, str]], None] | None = None,
 ) -> AlertResult:
     alert = Alert(
         title=title,
@@ -73,7 +80,12 @@ def send_alert_message(
         source_type=source_type,
         metadata=dict(metadata or {}),
     )
-    active_router = router or AlertRouter(config_path=_require_config_path(config_path), env_file=env_file, env=env)
+    active_router = router or AlertRouter(
+        config_path=_require_config_path(config_path),
+        env_file=env_file,
+        env=env,
+        agent_dispatch_fn=agent_dispatch_fn,
+    )
     if channel:
         return active_router.send_channel(alert, channel=channel, level=alert.level)
     return active_router.send(alert)

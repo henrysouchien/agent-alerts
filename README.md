@@ -7,7 +7,6 @@ Structured alert routing to humans and AI agents.
 ```bash
 pip install agent-alerts
 pip install "agent-alerts[mcp]"
-pip install "agent-alerts[agent]"
 ```
 
 Python imports stay under `alerts`.
@@ -54,36 +53,99 @@ print(result.agent_dispatched)
 | `telegram` | Fast human notification | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
 | `imessage` | Local macOS delivery | `IMESSAGE_TARGET` or `channels.imessage.recipient`; optional `backend`, `service` |
 | `email` | SMTP delivery | `smtp_host`, `smtp_port`, `from`, `to` plus `EMAIL_USERNAME`, `EMAIL_PASSWORD` |
-| `agent` | Background agent analysis with human feedback | `gateway_url`, `gateway_api_key_env`; optional `model`, `feedback_channel` |
+| `agent` | Background agent analysis | `agent_name`, `dispatch_fn` on router; optional `notify` |
+
+## Named Channel Variants
+
+Define multiple instances of the same channel type for different contexts:
+
+```yaml
+channels:
+  telegram-analyst:
+    enabled: true
+    bot_token_env: ANALYST_BOT_TOKEN
+    chat_id_env: TELEGRAM_CHAT_ID
+  telegram-finance:
+    enabled: true
+    bot_token_env: FINANCE_BOT_TOKEN
+    chat_id_env: TELEGRAM_CHAT_ID
+  agent-analyst:
+    enabled: true
+    agent_name: alerts-agent
+    notify: telegram
+  agent-finance:
+    enabled: true
+    agent_name: finance-agent
+    notify: telegram
+
+routing:
+  critical: [telegram-analyst, agent-analyst]
+  high: [telegram-analyst, agent-analyst]
+  normal: [telegram-analyst]
+  by_category:
+    budget:
+      high: [telegram-finance, agent-finance]
+      normal: [telegram-finance]
+```
+
+Channel names are resolved by prefix: `telegram-*` → TelegramChannel, `agent-*` → AgentChannel, etc. Each variant reads its own credentials from `channel_config`. Plain names (`telegram`, `agent`) still work for backward compatibility.
+
+Variants must be defined in `channels:` — undefined names are rejected to prevent typos silently falling back to default credentials.
+
+## Agent Channel
+
+The agent channel dispatches alerts to an AI agent for analysis. The caller provides a `dispatch_fn` when constructing the router:
+
+```python
+def my_dispatch(agent_name, task, notify, env, alert_context):
+    """Called on a background thread by AgentChannel."""
+    # invoke the agent, send notification, etc.
+    ...
+
+router = AlertRouter(
+    config_path="alerting.yaml",
+    agent_dispatch_fn=my_dispatch,
+)
+```
+
+Config:
+
+```yaml
+channels:
+  agent:
+    enabled: true
+    agent_name: alerts-agent
+    notify: telegram          # where to send agent findings
+```
+
+## Independent Agent Rate Limiting
+
+The agent channel can have its own rate budget, independent of human channels:
+
+```yaml
+rate_limits:
+  enabled: true
+  global_max_per_hour: 20
+  agent_max_per_hour: 5       # opt-in, 0 or absent = agent follows human limits
+```
+
+When human channels are rate-limited, the agent can still fire if under its own `agent_max_per_hour` budget. This prevents losing agent analysis during alert bursts.
 
 ## Router Config
 
 Example `alerting.yaml`:
 
 ```yaml
-schema_version: 2
+schema_version: 1
 on_config_error: use_last_good
 
 channels:
   telegram:
     enabled: true
-  imessage:
-    enabled: false
-    recipient: "+15555551212"
-    backend: applescript
-  email:
-    enabled: false
-    smtp_host: smtp.gmail.com
-    smtp_port: 587
-    from: alerts@example.com
-    to:
-      - user@example.com
   agent:
     enabled: true
-    gateway_url: "http://127.0.0.1:8002"
-    gateway_api_key_env: "ALERTS_GATEWAY_API_KEY"
-    model: "claude-sonnet-4-6"
-    feedback_channel: telegram
+    agent_name: alerts-agent
+    notify: telegram
 
 routing:
   critical: [telegram, agent]
@@ -132,11 +194,16 @@ alerts-mcp
 python -m alerts.mcp_server
 ```
 
-It provides three tools:
+It provides four tools:
 
 - `notify_send`
+- `notify_preview`
 - `notify_list_channels`
 - `notify_test_channel`
+
+`notify_send` always requires the confirmation token returned for the exact
+payload by `notify_preview`; environment variables and caller-supplied mode
+flags do not bypass that gate.
 
 ## License
 

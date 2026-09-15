@@ -4,7 +4,7 @@ import json
 from typing import Any, Mapping
 from urllib import request
 
-from ..config import get_telegram_config
+from ..config import _require_env
 from ..models import Alert, AlertLevel
 
 TELEGRAM_MESSAGE_LIMIT = 4096
@@ -48,8 +48,11 @@ class TelegramChannel:
         channel_config: dict[str, Any] | None = None,
         env: Mapping[str, str] | None = None,
     ) -> bool:
-        _ = channel_config
-        token, chat_id = get_telegram_config(env)
+        config = channel_config or {}
+        bot_token_env = str(config.get("bot_token_env", "TELEGRAM_BOT_TOKEN")).strip() or "TELEGRAM_BOT_TOKEN"
+        chat_id_env = str(config.get("chat_id_env", "TELEGRAM_CHAT_ID")).strip() or "TELEGRAM_CHAT_ID"
+        token = _require_env(bot_token_env, env)
+        chat_id = _require_env(chat_id_env, env)
         response = send_telegram(_render_message(alert, level), token, chat_id)
         return bool(response.get("ok"))
 

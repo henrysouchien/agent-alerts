@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from .config import AlertConfig, AlertConfigLoader
-from .models import Alert, AlertLevel, coerce_alert_level
+from .models import Alert, AlertLevel, coerce_alert_level, is_agent_channel
 from .quiet_hours import in_quiet_hours
 from .rate_limiter import InMemoryRateLimiter
 
@@ -19,6 +19,7 @@ class AlertDecision:
     level: AlertLevel
     channels: list[str]
     reason_skipped: str | None = None
+    agent_independent: bool = field(default=False, compare=False, repr=False)
 
 
 class AlertEvaluator:
@@ -35,12 +36,14 @@ class AlertEvaluator:
         thresholds = config.thresholds.get(self._source_key(alert), config.thresholds.get("_default", {}))
         passed_count = self._get_passed_count(alert.metadata)
         min_passed = int(thresholds.get("min_passed_count", 1))
+        agent_independent = False
         if passed_count < min_passed:
             return AlertDecision(
                 should_alert=False,
                 level=AlertLevel.LOW,
                 channels=[],
                 reason_skipped=f"passed_count {passed_count} < min {min_passed}",
+                agent_independent=agent_independent,
             )
 
         try:
@@ -62,25 +65,6 @@ class AlertEvaluator:
                     level = AlertLevel.NORMAL
                 break
 
-        if config.rate_limits.get("enabled", False):
-            max_per_hour = int(thresholds.get("max_per_hour", 5))
-            global_max = int(config.rate_limits.get("global_max_per_hour", 20))
-            source_type = self._source_key(alert)
-            if not self._rate_limiter.check(source_type, max_per_hour):
-                return AlertDecision(
-                    should_alert=False,
-                    level=level,
-                    channels=[],
-                    reason_skipped=f"rate limit exceeded ({max_per_hour}/hr for {source_type})",
-                )
-            if not self._rate_limiter.check_global(global_max):
-                return AlertDecision(
-                    should_alert=False,
-                    level=level,
-                    channels=[],
-                    reason_skipped=f"global rate limit exceeded ({global_max}/hr)",
-                )
-
         channels = self._resolve_channels(config, alert, level)
         if not channels:
             return AlertDecision(
@@ -88,6 +72,7 @@ class AlertEvaluator:
                 level=level,
                 channels=[],
                 reason_skipped=f"level '{level.value}' routes to no channels",
+                agent_independent=agent_independent,
             )
 
         if level is not AlertLevel.CRITICAL and config.quiet_hours.get("enabled", False):
@@ -99,6 +84,7 @@ class AlertEvaluator:
                 level=level,
                 channels=[],
                 reason_skipped="all channels suppressed by quiet hours",
+                agent_independent=agent_independent,
             )
 
         channels = [
@@ -106,16 +92,89 @@ class AlertEvaluator:
             for channel in channels
             if isinstance(config.channels.get(channel), dict) and config.channels[channel].get("enabled", False)
         ]
+        agent_channels_routed = [channel for channel in channels if is_agent_channel(channel)]
+        if len(agent_channels_routed) > 1:
+            log.warning(
+                "Multiple agent channels routed for %s, keeping first: %s",
+                self._source_key(alert),
+                agent_channels_routed[0],
+            )
+            channels = [channel for channel in channels if not is_agent_channel(channel)]
+            channels.extend(agent_channels_routed[:1])
+        if not channels:
+            return AlertDecision(
+                should_alert=False,
+                level=level,
+                channels=[],
+                reason_skipped="no enabled channels",
+                agent_independent=agent_independent,
+            )
+
+        if config.rate_limits.get("enabled", False):
+            max_per_hour = int(thresholds.get("max_per_hour", 5))
+            global_max = int(config.rate_limits.get("global_max_per_hour", 20))
+            source_type = self._source_key(alert)
+            source_ok = self._rate_limiter.check(source_type, max_per_hour)
+            global_ok = self._rate_limiter.check_global(global_max)
+            human_ok = source_ok and global_ok
+
+            human_channels = [channel for channel in channels if not is_agent_channel(channel)]
+            agent_channels_routed = [channel for channel in channels if is_agent_channel(channel)]
+            surviving: list[str] = []
+            agent_max = 0
+
+            if human_ok:
+                surviving.extend(human_channels)
+
+            if agent_channels_routed:
+                agent_max = int(config.rate_limits.get("agent_max_per_hour", 0))
+                if agent_max > 0:
+                    if self._rate_limiter.check_agent(agent_max):
+                        surviving.extend(agent_channels_routed)
+                        agent_independent = True
+                elif human_ok:
+                    surviving.extend(agent_channels_routed)
+
+            if not surviving:
+                if human_channels and not human_ok:
+                    reason = (
+                        f"rate limit exceeded ({max_per_hour}/hr for {source_type})"
+                        if not source_ok
+                        else f"global rate limit exceeded ({global_max}/hr)"
+                    )
+                elif agent_channels_routed and agent_max > 0:
+                    reason = f"agent rate limit exceeded ({agent_max}/hr)"
+                elif not human_ok:
+                    reason = (
+                        f"rate limit exceeded ({max_per_hour}/hr for {source_type})"
+                        if not source_ok
+                        else f"global rate limit exceeded ({global_max}/hr)"
+                    )
+                else:
+                    reason = "all channels rate-limited"
+                return AlertDecision(
+                    should_alert=False,
+                    level=level,
+                    channels=[],
+                    reason_skipped=reason,
+                    agent_independent=agent_independent,
+                )
+
+            channels = surviving
 
         return AlertDecision(
             should_alert=bool(channels),
             level=level,
             channels=channels,
             reason_skipped=None if channels else "no enabled channels",
+            agent_independent=agent_independent,
         )
 
     def record_alert_sent(self, source_type: str) -> None:
         self._rate_limiter.record(source_type)
+
+    def record_agent_sent(self, source_type: str) -> None:
+        self._rate_limiter.record_agent()
 
     def get_channel_config(self, channel: str) -> dict[str, Any] | None:
         return self._loader.get_channel_config(channel)

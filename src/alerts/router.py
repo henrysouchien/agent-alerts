@@ -1,14 +1,23 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
-from typing import Mapping
+from typing import Any, Callable, Mapping
 
 from .channels.email import EmailChannel
 from .channels.imessage import IMessageChannel
 from .channels.telegram import TelegramChannel
 from .config import _load_dotenv
 from .evaluator import AlertDecision, AlertEvaluator
-from .models import Alert, AlertLevel, AlertResult, coerce_alert_level
+from .models import Alert, AlertLevel, AlertResult, coerce_alert_level, is_agent_channel
+
+log = logging.getLogger(__name__)
+
+_CHANNEL_PREFIXES = [
+    ("telegram", TelegramChannel),
+    ("imessage", IMessageChannel),
+    ("email", EmailChannel),
+]
 
 
 class AlertRouter:
@@ -18,9 +27,11 @@ class AlertRouter:
         config_path: str | Path,
         env_file: str | Path | None = None,
         env: Mapping[str, str] | None = None,
+        agent_dispatch_fn: Callable[[str, str, Any, Mapping[str, str] | None, dict[str, str]], None] | None = None,
     ) -> None:
         self._env_file = env_file
         self._env = dict(env) if env is not None else (_load_dotenv(env_file) if env_file is not None else None)
+        self._agent_dispatch_fn = agent_dispatch_fn
         self.alert_evaluator = AlertEvaluator(config_path)
         self._channels = {
             "telegram": TelegramChannel(),
@@ -45,6 +56,19 @@ class AlertRouter:
         if not decision.should_alert:
             return result
 
+        agent_channels = [channel for channel in decision.channels if is_agent_channel(channel)]
+        if len(agent_channels) > 1:
+            log.warning("Multiple agent channels in decision, keeping first: %s", agent_channels[0])
+            channels = [channel for channel in decision.channels if not is_agent_channel(channel)]
+            channels.append(agent_channels[0])
+            decision = AlertDecision(
+                should_alert=decision.should_alert,
+                level=decision.level,
+                channels=channels,
+                reason_skipped=decision.reason_skipped,
+                agent_independent=decision.agent_independent,
+            )
+
         for channel_name in decision.channels:
             try:
                 adapter = self._get_channel(channel_name)
@@ -62,15 +86,20 @@ class AlertRouter:
                 result.failed_channels[channel_name] = str(exc)
                 continue
             if delivered:
-                if channel_name == "agent":
+                if is_agent_channel(channel_name):
                     result.agent_dispatched = True
                 else:
                     result.delivered_channels.append(channel_name)
             else:
                 result.failed_channels[channel_name] = "delivery failed"
 
-        if result.delivered_channels or result.agent_dispatched:
+        if result.delivered_channels:
             self.alert_evaluator.record_alert_sent(_source_key(alert))
+        if result.agent_dispatched:
+            if decision.agent_independent:
+                self.alert_evaluator.record_agent_sent(_source_key(alert))
+            elif not result.delivered_channels:
+                self.alert_evaluator.record_alert_sent(_source_key(alert))
         return result
 
     def send_channel(self, alert: Alert, *, channel: str, level: AlertLevel | str | None = None) -> AlertResult:
@@ -91,7 +120,7 @@ class AlertRouter:
             result.failed_channels[channel] = str(exc)
             return result
         if delivered:
-            if channel == "agent":
+            if is_agent_channel(channel):
                 result.agent_dispatched = True
             else:
                 result.delivered_channels.append(channel)
@@ -100,18 +129,34 @@ class AlertRouter:
         return result
 
     def _get_channel(self, channel_name: str):
+        if "-" in channel_name and not self._is_configured_channel(channel_name):
+            self._channels.pop(channel_name, None)
+            return None
+
         adapter = self._channels.get(channel_name)
         if adapter is not None:
             return adapter
-        if channel_name != "agent":
-            return None
-        try:
+
+        for prefix, cls in _CHANNEL_PREFIXES:
+            if channel_name.startswith(prefix + "-"):
+                adapter = cls()
+                self._channels[channel_name] = adapter
+                return adapter
+
+        if is_agent_channel(channel_name):
             from .channels.agent import AgentChannel
-        except ImportError as exc:
-            raise ImportError("httpx not installed (pip install agent-alerts[agent])") from exc
-        adapter = AgentChannel()
-        self._channels["agent"] = adapter
-        return adapter
+
+            adapter = AgentChannel(dispatch_fn=self._agent_dispatch_fn)
+            self._channels[channel_name] = adapter
+            return adapter
+
+        return None
+
+    def _is_configured_channel(self, channel_name: str) -> bool:
+        config = self.alert_evaluator.get_config()
+        if config is None:
+            return False
+        return channel_name in config.channels
 
 
 def _source_key(alert: Alert) -> str:

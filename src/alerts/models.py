@@ -39,6 +39,10 @@ def coerce_alert_category(value: AlertCategory | str) -> AlertCategory:
         return AlertCategory.CUSTOM
 
 
+def is_agent_channel(name: str) -> bool:
+    return name == "agent" or name.startswith("agent-")
+
+
 @dataclass(frozen=True)
 class Alert:
     title: str

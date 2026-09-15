@@ -28,6 +28,9 @@ class InMemoryRateLimiter:
         self._agent_rate_counts = recent
         return len(recent) < max_per_hour
 
+    def record_agent(self) -> None:
+        self._agent_rate_counts.append(time.time())
+
     def record(self, source_type: str, *, agent: bool = False) -> None:
         now = time.time()
         self._rate_counts[source_type].append(now)

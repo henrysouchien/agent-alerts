@@ -9,12 +9,13 @@ from typing import Any, Mapping
 
 import yaml
 
-from .models import AlertLevel
+from .models import AlertLevel, is_agent_channel
 
 log = logging.getLogger(__name__)
 
-SUPPORTED_SCHEMA_VERSIONS = {1, 2}
+SUPPORTED_SCHEMA_VERSIONS = {1, 2, 3}
 KNOWN_ROUTING_KEYS = {level.value for level in AlertLevel} | {"by_category"}
+LEGACY_AGENT_CHANNEL_KEYS = ("gateway_url", "gateway_api_key_env", "feedback_channel", "model")
 
 
 @dataclass
@@ -155,6 +156,19 @@ class AlertConfigLoader:
         for channel in self._iter_routed_channels(config.routing):
             if channel not in config.channels:
                 log.warning("Routing references undefined channel: '%s'", channel)
+
+        for channel_name, channel_config in config.channels.items():
+            if not is_agent_channel(channel_name):
+                continue
+            legacy_keys = [key for key in LEGACY_AGENT_CHANNEL_KEYS if key in channel_config]
+            if legacy_keys:
+                raise ValueError(
+                    f"Agent channel '{channel_name}' uses legacy config keys: {', '.join(legacy_keys)}. "
+                    "Migrate to schema_version 3 and replace them with 'agent_name' and optional 'notify'."
+                )
+            agent_name = str(channel_config.get("agent_name", "")).strip()
+            if not agent_name:
+                raise ValueError(f"Agent channel '{channel_name}' missing required key: agent_name")
 
         quiet_hours = config.quiet_hours
         if not quiet_hours.get("enabled"):
