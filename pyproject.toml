@@ -1,14 +1,14 @@
 [project]
 name = "agent-alerts"
-version = "0.2.0"
+version = "0.2.1"
 description = "Structured alert routing to humans and AI agents"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
-dependencies = ["PyYAML>=6.0"]
+dependencies = ["PyYAML>=6.0.3"]
 
 [project.optional-dependencies]
-mcp = ["fastmcp>=0.1.0"]
+mcp = ["fastmcp>=3.2.4"]
 dev = ["pytest"]
 
 [project.urls]
