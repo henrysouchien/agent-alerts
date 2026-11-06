@@ -46,6 +46,18 @@ print(result.delivered_channels)
 print(result.agent_dispatched)
 ```
 
+## Send Authority
+
+Every outbound send (Telegram, iMessage, email, the agent channel, `send`, `AlertRouter`, and the MCP `notify_*` tools) is default-deny. The host process must inject a predicate that says it may send:
+
+```python
+import alerts
+
+alerts.set_send_authority(lambda: is_production_runtime())
+```
+
+Until a predicate is injected, or whenever it returns anything other than `True` or raises, the send is refused with `alerts.SendNotAuthorized` before any network, SMTP, subprocess or agent-dispatch work starts. The MCP `notify_send` and `notify_test_channel` tools return a non-recoverable `SendNotAuthorized` error envelope; `alerts-mcp` runs in its own process, so it sends only if its host injects a predicate. The predicate is called on every send attempt. `alerts.clear_send_authority()` returns to default-deny.
+
 ## Channels
 
 | Channel | Purpose | Required config |

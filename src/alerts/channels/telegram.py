@@ -4,6 +4,7 @@ import json
 from typing import Any, Mapping
 from urllib import request
 
+from ..authority import require_send_authority
 from ..config import _require_env
 from ..models import Alert, AlertLevel
 
@@ -17,6 +18,7 @@ def _truncate_message(message: str) -> str:
 
 
 def send_telegram(message: str, token: str, chat_id: str, **kwargs) -> dict:
+    require_send_authority("telegram")
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload_dict = {"chat_id": chat_id, "text": _truncate_message(message)}
     payload_dict.update(kwargs)

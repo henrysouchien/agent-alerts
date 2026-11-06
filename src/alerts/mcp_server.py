@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from . import send
+from .authority import SendNotAuthorized
 from .config import get_imessage_target, get_telegram_config
 
 _VALID_CHANNELS = ("telegram", "imessage", "email")
@@ -69,6 +70,8 @@ def create_mcp():
                 kwargs["parse_mode"] = parse_mode
         try:
             result = send(message, channel=channel, **kwargs)
+        except SendNotAuthorized as exc:
+            return _not_authorized_envelope(exc)
         except Exception as exc:
             return ToolError(
                 error_class=type(exc).__name__,
@@ -132,9 +135,20 @@ def create_mcp():
         Sibling tools: notify_preview and notify_send are for user-provided notification content.
         Common mistake: do not use this for real alerts; it sends only the fixed test message.
         """
-        return send("Alerts MCP test - connection OK", channel=channel)
+        try:
+            return send("Alerts MCP test - connection OK", channel=channel)
+        except SendNotAuthorized as exc:
+            return _not_authorized_envelope(exc)
 
     return mcp
+
+
+def _not_authorized_envelope(exc: SendNotAuthorized) -> dict:
+    return ToolError(
+        error_class=type(exc).__name__,
+        message=str(exc),
+        recoverable=False,
+    ).to_envelope()
 
 
 def _notification_preview(

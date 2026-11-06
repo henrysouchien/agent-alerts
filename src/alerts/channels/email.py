@@ -5,6 +5,7 @@ import smtplib
 from email.message import EmailMessage
 from typing import Any, Mapping
 
+from ..authority import require_send_authority
 from ..models import Alert, AlertLevel
 
 
@@ -14,6 +15,7 @@ def send_email(
     channel_config: dict[str, Any] | None = None,
     env: Mapping[str, str] | None = None,
 ) -> bool:
+    require_send_authority("email")
     config = channel_config or {}
     smtp_host = str(config.get("smtp_host", "")).strip()
     sender = str(config.get("from", "")).strip()

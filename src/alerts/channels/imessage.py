@@ -5,6 +5,7 @@ import os
 import subprocess
 from typing import Any, Mapping
 
+from ..authority import require_send_authority
 from ..config import get_imessage_target
 from ..models import Alert, AlertLevel
 
@@ -18,6 +19,7 @@ def send_imessage(
     *,
     backend: str | None = None,
 ) -> dict:
+    require_send_authority("imessage")
     resolved_backend = _resolve_backend(backend)
     if resolved_backend == "imsg":
         return _send_imsg(message, target, service=service)

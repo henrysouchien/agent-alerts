@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from .authority import require_send_authority
 from .channels.email import EmailChannel
 from .channels.imessage import IMessageChannel
 from .channels.telegram import TelegramChannel
@@ -55,6 +56,7 @@ class AlertRouter:
         result = AlertResult(alert=alert, evaluated_level=decision.level, decision_reason=decision.reason_skipped)
         if not decision.should_alert:
             return result
+        require_send_authority("alert")
 
         agent_channels = [channel for channel in decision.channels if is_agent_channel(channel)]
         if len(agent_channels) > 1:
@@ -105,6 +107,7 @@ class AlertRouter:
     def send_channel(self, alert: Alert, *, channel: str, level: AlertLevel | str | None = None) -> AlertResult:
         evaluated_level = coerce_alert_level(level or alert.level)
         result = AlertResult(alert=alert, evaluated_level=evaluated_level)
+        require_send_authority(channel)
         try:
             adapter = self._get_channel(channel)
             if adapter is None:

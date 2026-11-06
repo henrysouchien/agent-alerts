@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from .authority import SendNotAuthorized, clear_send_authority, require_send_authority, set_send_authority
 from .channels.email import send_email
 from .channels.imessage import send_imessage
 from .channels.telegram import send_telegram
@@ -13,6 +14,7 @@ from .router import AlertRouter, DEFAULT_CONFIG_PATH
 
 
 def send(message: str, channel: str = "telegram", **kwargs) -> dict | bool:
+    require_send_authority(channel)
     env = _resolve_env(kwargs.pop("env", None), kwargs.pop("env_file", None))
 
     if channel == "telegram":
@@ -111,9 +113,12 @@ __all__ = [
     "AlertLevel",
     "AlertResult",
     "AlertRouter",
+    "SendNotAuthorized",
+    "clear_send_authority",
     "get_imessage_target",
     "get_telegram_config",
     "send",
+    "set_send_authority",
     "send_alert",
     "send_alert_message",
     "send_email",

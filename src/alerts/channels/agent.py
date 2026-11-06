@@ -6,6 +6,7 @@ import threading
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from ..authority import require_send_authority
 from ..models import Alert, AlertLevel
 
 log = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ class AgentChannel:
         channel_config: dict[str, Any] | None = None,
         env: Mapping[str, str] | None = None,
     ) -> bool:
+        require_send_authority("agent")
         config = channel_config or {}
         agent_name = str(config.get("agent_name", "")).strip()
         if not agent_name:
